@@ -443,15 +443,16 @@ Ship the loop; make it honest; measure it. Nothing that needs a second model.
 
 **In:**
 
-- Python package `systemone_harness` (Python 3.10+, `httpx` the only dependency), with
+- Python package `systemone_harness` (Python 3.10+; `httpx` for the provider and `pyyaml` for action-space files are the only dependencies), with
   `ActionSpace`, `Environment`, `StateEncoder`, `Provider` (OpenRouter and TypeSafe direct),
   `Gate`, `Controller`, `Trace`.
 - Declarative action spaces in YAML or code, the compiler with its ceilings and refusals.
 - Two environments: a deterministic text workflow (an order-fulfilment state machine used by the
   tests and the benchmark) and a JSON-over-stdio environment adapter so any process can be an
   environment (`observe`, `execute`, `terminal` as three JSON lines).
-- A CLI: `s1 run <actions.yaml> --env <module or command> --goal "…" [--max-steps N]`, printing
-  each step as it happens and the trace as JSON at the end.
+- A CLI: `s1 run --env order[:scenario]` for the built-in environment, or
+  `s1 run --actions <yaml> --env-cmd "<command>" --goal "…"` for any process that speaks the stdio
+  protocol, printing each step as it happens and, with `--json`, the trace at the end.
 - The UHP Core server (`s1 serve`) and the conformance report at `core` in the README.
 - The benchmark script: steps, wall time, cost, and refusal rate on the built-in environment, with
   the numbers in the README rather than adjectives.

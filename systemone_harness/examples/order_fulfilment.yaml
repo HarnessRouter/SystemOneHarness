@@ -1,0 +1,55 @@
+# The action space of the order-fulfilment environment (systemone_harness.envs.OrderWorkflow).
+# The same declaration lives in code beside the environment; this file is the shape an operator
+# writes for their own environment.
+instructions: >-
+  You run a warehouse's order desk. Move the order to shipped, or cancel it when the goal says so.
+  Ship only after every item is picked and the order is packed.
+
+actions:
+  pick_item:
+    description: Pick one unpicked item off the shelf and put it in the order's bin.
+    risk: write
+    params:
+      item:
+        from: unpicked_items            # a candidate list the environment enumerates each step
+        instructions: Which unpicked item to pick next?
+  pack:
+    description: Pack the bin into a parcel. Only possible once every item is picked.
+    risk: write
+  choose_carrier:
+    description: Choose the carrier for the parcel.
+    risk: write
+    params:
+      carrier:
+        from: carriers
+        instructions: Which carrier matches what the goal asks for (cheapest, fastest, or a named one)?
+  ship:
+    description: Hand the packed parcel to the chosen carrier. Only after pack and choose_carrier.
+    risk: destructive
+  cancel_order:
+    description: Cancel the order and return any picked items to the shelf.
+    risk: destructive
+    params:
+      reason:
+        choices:
+          customer_request: the customer asked to cancel
+          out_of_stock: an item cannot be fulfilled
+          fraud: the order failed a fraud check
+        instructions: Why is the order being cancelled?
+  add_note:
+    description: Attach a note to the order for the customer service team.
+    risk: read
+    params:
+      note:
+        choices:
+          delay: the order will ship later than promised
+          partial: part of the order is unavailable
+          gift: the parcel is a gift and needs no invoice
+        instructions: Which note applies?
+
+# confidence the weakest judgment must clear, by the action's risk; `finish` is the goal check
+gate:
+  read: 0.5
+  write: 0.6
+  destructive: 0.8
+  finish: 0.5
