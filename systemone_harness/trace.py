@@ -99,3 +99,20 @@ class Run:
 
 def _params_text(params: dict) -> str:
     return ", ".join(f"{k}={v!r}" for k, v in (params or {}).items())
+
+
+def reasoning_text(step: "Step") -> str:
+    """One sentence on a step that executed nothing: what the model wanted, how sure it was, and why
+    the harness did not act. Harness prose for the trace and for a host's reasoning item."""
+    na = step.answers.get("next_action") or {}
+    probs = na.get("probabilities") or {}
+    ranked = sorted(probs.items(), key=lambda kv: -float(kv[1] or 0))[:3]
+    dist = ", ".join(f"{k} {float(v):.2f}" for k, v in ranked)
+    if step.verdict == "refused":
+        return (f"Refused {step.action}: the weakest judgment was {step.weakest:.2f}, below the {step.threshold:.2f} "
+                f"the action's risk requires. Distribution: {dist}.")
+    if step.verdict == "finish":
+        return f"The model proposed finishing ({step.note}). Distribution: {dist}."
+    if step.verdict == "escalate":
+        return f"The model asked for help; no offered action fit. Distribution: {dist}."
+    return f"Distribution: {dist}."

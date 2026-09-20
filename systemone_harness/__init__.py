@@ -12,10 +12,10 @@ from .environment import Environment, Observation, Result
 from .gate import Gate, Verdict
 from .provider import (DecisionProvider, OpenRouterProvider, ProviderError, RecordedProvider,
                        TypeSafeProvider, provider_from_env)
-from .trace import Run, Step
+from .trace import Run, Step, reasoning_text
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 __all__ = ["Action", "ActionSpace", "ActionSpaceError", "Guard", "Param", "Controller", "StateEncoder",
            "Environment", "Observation", "Result", "Gate", "Verdict", "DecisionProvider",
            "OpenRouterProvider", "TypeSafeProvider", "RecordedProvider", "ProviderError",
-           "provider_from_env", "Run", "Step"]
+           "provider_from_env", "Run", "Step", "reasoning_text"]

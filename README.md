@@ -17,7 +17,7 @@ The design, with the measurements it rests on, is in [docs/design.md](docs/desig
 
 | | |
 |---|---|
-| Version | 0.1.0, the first loop |
+| Version | 0.1.1, the first loop |
 | Unified Harness Protocol | conformant at `core`, 40 of 40 checks, suite 2026.9.12.post1 ([report](docs/reports/uhp-conformance-core-2026-09-19.json)) |
 | Built-in benchmark | 15 of 15 goals met on the live model, in process and over MCP ([numbers](#benchmark)) |
 | Models | `~typesafe/jev-latest` and `typesafe/jev-1.13` on OpenRouter; `jev-latest` on TypeSafe directly |

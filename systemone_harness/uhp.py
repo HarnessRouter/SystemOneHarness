@@ -31,7 +31,7 @@ from . import __version__
 from .actions import ActionSpace
 from .controller import Controller
 from .environment import Environment
-from .trace import Run, Step
+from .trace import Run, Step, reasoning_text
 
 VERSIONS = ["2026-09-12"]
 BASE = "systemone"
@@ -218,7 +218,7 @@ class Server:
             self._add_item(task, fco)
         else:
             rs = {"id": f"rs_{n}", "type": "reasoning", "status": "completed",
-                  "summary": [{"type": "summary_text", "text": _reasoning_text(step)}]}
+                  "summary": [{"type": "summary_text", "text": reasoning_text(step)}]}
             self._add_item(task, rs)
 
     def _add_item(self, task: Task, item: dict) -> None:
@@ -307,21 +307,6 @@ def _input_text(inp) -> str:
             if isinstance(c, dict) and c.get("type") in ("input_text", "text") and c.get("text"):
                 parts.append(str(c["text"]))
     return "\n".join(parts)
-
-
-def _reasoning_text(step: Step) -> str:
-    na = step.answers.get("next_action") or {}
-    probs = na.get("probabilities") or {}
-    ranked = sorted(probs.items(), key=lambda kv: -float(kv[1] or 0))[:3]
-    dist = ", ".join(f"{k} {float(v):.2f}" for k, v in ranked)
-    if step.verdict == "refused":
-        return (f"Refused {step.action}: the weakest judgment was {step.weakest:.2f}, below the {step.threshold:.2f} "
-                f"the action's risk requires. Distribution: {dist}.")
-    if step.verdict == "finish":
-        return f"The model proposed finishing ({step.note}). Distribution: {dist}."
-    if step.verdict == "escalate":
-        return f"The model asked for help; no offered action fit. Distribution: {dist}."
-    return f"Distribution: {dist}."
 
 
 # ── HTTP ──
