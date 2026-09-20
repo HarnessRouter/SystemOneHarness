@@ -68,6 +68,9 @@ class Controller:
                     return self._end(run, "incomplete", "timeout")
 
                 obs = self.env.observe()
+                realtime = bool(getattr(obs, "realtime", False))
+                if realtime and self.encoder.history_steps > 3:
+                    self.encoder.history_steps = 3
                 if obs.artifacts:
                     run.artifacts.extend(a for a in obs.artifacts if a not in run.artifacts)
                 if obs.terminal:
@@ -115,7 +118,7 @@ class Controller:
                     refusals += 1
                     finish_insist = 0
                     self._record(run, step)
-                    if refusals >= self.refusal_streak:
+                    if refusals >= self.refusal_streak and not realtime:
                         return self._end(run, "incomplete", "no_confident_action")
                     continue
 
@@ -123,7 +126,7 @@ class Controller:
                 finish_insist = 0
                 sig = (verdict.action, json.dumps(verdict.params, sort_keys=True, default=str),
                        _state_hash(obs))
-                if sig == last_sig:
+                if sig == last_sig and not realtime:
                     step.note = _join(step.note, "same action on the same state as the previous step")
                     self._record(run, step)
                     return self._end(run, "incomplete", "repeated_action")

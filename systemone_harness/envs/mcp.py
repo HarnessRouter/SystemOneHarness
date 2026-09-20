@@ -147,7 +147,8 @@ class McpEnvironment(Environment):
         d = data or {}
         return Observation(text=str(d.get("text") or text), fields=d.get("fields") or {},
                            candidates=d.get("candidates") or {}, terminal=bool(d.get("terminal")),
-                           artifacts=[str(a) for a in (d.get("artifacts") or [])])
+                           artifacts=[str(a) for a in (d.get("artifacts") or [])],
+                           realtime=bool(d.get("realtime")))
 
     def execute(self, action: str, params: dict) -> Result:
         schema = next((t["inputSchema"] for t in self.tools if t["name"] == action), {})

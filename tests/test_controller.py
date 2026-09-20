@@ -109,3 +109,24 @@ def test_a_continued_run_keeps_the_environment_and_sees_its_earlier_steps():
     second = Controller(OrderWorkflow.action_space(), env, prov).run(env.goal, reset=False, prior=first.steps)
     assert second.status == "completed" and env.goal_met()
     assert seen_history[0] and seen_history[0][0].startswith("pick_item(item='blue mug')")
+
+
+class _Realtime(OrderWorkflow):
+    """The order desk, declared real-time: the world moves whether or not a decision is made."""
+    def observe(self):
+        obs = super().observe()
+        obs.realtime = True
+        return obs
+
+
+def test_a_real_time_environment_is_not_stopped_by_refusals_or_repeats():
+    env = _Realtime("cancel_fraud")
+    shaky = lambda s, q: fill(q, {"next_action": choice(q, "next_action", "cancel_order", 0.6),
+                                  "cancel_order__reason": choice(q, "cancel_order__reason", "fraud", 0.9)})
+    run = Controller(OrderWorkflow.action_space(), env, RecordedProvider(shaky), refusal_streak=3, max_steps=6).run(env.goal)
+    assert run.status == "incomplete" and run.reason == "max_steps"      # six refusals, and the clock is what ends it
+    assert [s.verdict for s in run.steps] == ["refused"] * 6
+    env = _Realtime("ship_cheapest")
+    run = Controller(OrderWorkflow.action_space(), env, max_steps=4,
+                     provider=RecordedProvider(lambda s, q: fill(q, {"next_action": choice(q, "next_action", "pack")}))).run(env.goal)
+    assert run.reason == "max_steps" and len(run.steps) == 4           # the same action on the same state, four times, is four ticks

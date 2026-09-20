@@ -23,6 +23,14 @@ The design, with the measurements it rests on, is in [docs/design.md](docs/desig
 | Models | `~typesafe/jev-latest` and `typesafe/jev-1.13` on OpenRouter; `jev-latest` on TypeSafe directly |
 | Python | 3.10 or newer; depends on `httpx` and `pyyaml`; `.[mcp]` adds MCP environments, `.[browser]` adds the browser |
 
+### Real-time environments
+
+An environment whose world moves whether or not a decision is made (a game, a live feed) says so
+with `"realtime": true` on its observations. The loop then treats a refused or repeated decision
+as a tick with the last action standing rather than a reason to stop, and keeps the history it
+shows the model short, since the state is what matters and tokens are latency. Actions in such an
+environment are best momentary key states that stay set until changed; the loop is the clock.
+
 ## Quickstart
 
 ```sh

@@ -17,6 +17,10 @@ class Observation:
     candidates: dict = field(default_factory=dict)   # name -> list[str] or {value: description}
     terminal: bool = False
     artifacts: list[str] = field(default_factory=list)
+    # A real-time environment: the world moves whether or not a decision is made, so a refused
+    # or repeated decision is a tick with the last action standing, never a reason to stop, and
+    # the history the model reads is short (the state is what matters, and tokens are latency).
+    realtime: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
