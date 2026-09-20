@@ -16,6 +16,12 @@
 
 One model call per step. No generated actions. A probability on every transition.
 
+<p align="center">
+  <img src=".github/images/system-one-browser-gameplay-demo.gif" width="100%" alt="Jev uses System One Harness to play a live browser game by choosing one typed action per step.">
+  <br>
+  <sub><strong>Jev playing a live browser game through System One Harness</strong> — one typed decision per step, with no generated control text.</sub>
+</p>
+
 The first supported model is [Jev](https://typesafe.ai) by TypeSafe, available through OpenRouter or TypeSafe directly.
 
 <a href="https://github.com/HarnessRouter/SystemOneHarness" title="Star System One Harness on GitHub">
