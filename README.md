@@ -6,8 +6,7 @@ space, one decision per step, a few hundred milliseconds and a fraction of a cen
 A System One model is a decision function, not a text generator. You send it a state and a set of
 typed questions (a choice among named options, a yes/no probability, a score on a legend) and it
 returns an answer and a probability distribution for each, in one non-autoregressive pass. The
-first such model is [Jev](https://typesafe.ai) by TypeSafe, served directly and through
-[OpenRouter](https://openrouter.ai). This harness is the loop such a model needs: something to hold
+first such model is [Jev](https://typesafe.ai) by TypeSafe. This harness is the loop such a model needs: something to hold
 the state, enumerate the actions, ask the questions, judge the confidence, execute the chosen action
 against the world, and stop for the right reason.
 
