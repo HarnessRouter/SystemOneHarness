@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>System One Harness</title>
+<link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+<header>
+  <h1>System One Harness</h1>
+  <span id="status" class="pill">not connected</span>
+</header>
+
+<section id="connect">
+  <label>Server <input id="base" placeholder="http://127.0.0.1:8710" spellcheck="false"></label>
+  <label>API key <input id="key" type="password" placeholder="the key the server was started with"></label>
+  <button id="connectBtn">Connect</button>
+  <p id="connectNote" class="note"></p>
+</section>
+
+<section id="task" hidden>
+  <label>Harness <select id="harness"></select></label>
+  <label>Goal <textarea id="goal" rows="3" placeholder="Book a table for Richard at 19:30 with a window seat."></textarea></label>
+  <label>Values the page may need, one per line as name=value <textarea id="values" rows="2" placeholder="name=Richard"></textarea></label>
+  <div class="row">
+    <button id="startBtn">Start</button>
+    <button id="cancelBtn" hidden>Stop</button>
+    <button id="continueBtn" hidden>Continue with this goal</button>
+  </div>
+  <p id="taskNote" class="note"></p>
+</section>
+
+<section id="trace" hidden>
+  <div class="row between">
+    <strong id="traceTitle">Steps</strong>
+    <span id="traceMeta" class="note"></span>
+  </div>
+  <ol id="steps"></ol>
+  <p id="final" class="final" hidden></p>
+</section>
+
+<script src="sidepanel.js"></script>
+</body>
+</html>

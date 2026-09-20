@@ -17,11 +17,11 @@ The design, with the measurements it rests on, is in [docs/design.md](docs/desig
 
 | | |
 |---|---|
-| Version | 0.1.1, the first loop |
+| Version | 0.2.0, the first loop and the browser |
 | Unified Harness Protocol | conformant at `core`, 40 of 40 checks, suite 2026.9.12.post1 ([report](docs/reports/uhp-conformance-core-2026-09-19.json)) |
 | Built-in benchmark | 15 of 15 goals met on the live model, in process and over MCP ([numbers](#benchmark)) |
 | Models | `~typesafe/jev-latest` and `typesafe/jev-1.13` on OpenRouter; `jev-latest` on TypeSafe directly |
-| Python | 3.10 or newer; depends on `httpx` and `pyyaml`; `pip install -e .[mcp]` adds the MCP environment |
+| Python | 3.10 or newer; depends on `httpx` and `pyyaml`; `.[mcp]` adds MCP environments, `.[browser]` adds the browser |
 
 ## Quickstart
 
@@ -247,13 +247,54 @@ step as it does from the in-process environment; a test checks both. The server 
 lines over the official MCP SDK (`systemone_harness/envs/order_mcp.py`) and is the pattern for any
 simulator or real surface you want the loop to drive.
 
+## A web page as the environment
+
+Any web page can be the environment, on the open-source [Browser Use](https://github.com/browser-use/browser-use)
+project: it reads the page into an indexed representation, every control numbered with its role
+and name, and executes by index over the Chrome DevTools Protocol. The harness turns that into the
+state definition convention: numbered controls become candidate lists, the operations become nine
+actions, and the text a form needs comes from you as named values the model picks by name and
+never writes.
+
+```sh
+pip install -e ".[browser]"
+s1 run --browser --headless --start-url https://example.com/book \
+       --text name=Richard --text email=r@example.com \
+       --goal "Book a table for Richard at 19:30 with a window seat."
+s1 run --browser --cdp-url http://127.0.0.1:9222 --goal "..."     # your own Chrome
+python -m systemone_harness.envs.browser_mcp --http --port 8720    # the same environment for a host
+```
+
+| action | what the model chooses |
+|---|---|
+| `click` | one numbered control |
+| `type_text` | a text field, and which supplied value goes in it |
+| `select_option` | an option of a dropdown (a dropdown is reachable this way only) |
+| `press_key`, `hold_key` | a key from a fixed list; `hold_key` also a duration, for pages that react to held keys |
+| `scroll`, `go_back`, `switch_tab`, `wait` | a direction, nothing, a tab, nothing |
+
+Measured on 2026-09-19 with the live model: a booking form (name, time, window seat, submit)
+completed in four actions in three runs of three, 4.6 to 5.2 s each, at 150 to 315 ms a model
+step. What it took to get there is in [docs/browser-use.md](docs/browser-use.md): three changes to
+what the page says to the model, none to the gate.
+
+The boundary, measured the same day: a page drawn on a canvas gives a DOM observation nothing but
+its DOM. On a Super Mario page the model saw the score line, held the right arrow nine times, and
+the loop stopped when the observation stopped changing. Driving such a page well needs the page's
+own state as text, which is an adapter for that page, not something a general browser environment
+can invent.
+
+To reach your own Chrome, allow the connection at `chrome://inspect/#remote-debugging` (Chrome 144
+and later) or start Chrome with `--remote-debugging-port=9222`, then pass `--cdp-url`.
+
 ## The command line
 
 ```
 s1 run    [--goal TEXT] [--env order[:scenario]] [--env-cmd CMD --actions YAML] [--mcp CMD_OR_URL]
+          [--browser [--cdp-url URL | --headless] [--start-url URL] [--text NAME=VALUE ...]]
           [--model ID] [--max-steps N] [--timeout SECONDS] [--json TRACE_PATH]
 s1 tools  --mcp CMD_OR_URL [--mcp-transport sse|http] [--mcp-header "Name: value"] [--actions YAML] [--json PATH]
-s1 serve  --api-key KEY [--host HOST] [--port PORT] [--actions YAML --env-cmd CMD --name NAME | --mcp ... --name NAME]
+s1 serve  --api-key KEY [--host HOST] [--port PORT] [--actions YAML --env-cmd CMD --name NAME | --mcp ... --name NAME | --browser ...]
 s1 bench  [--runs N] [--model ID] [--max-steps N] [--json PATH]
 ```
 
@@ -332,12 +373,13 @@ pip install -e . pytest
 pytest -q tests
 ```
 
-Thirty-five tests: the compiler (free text refused, reserved names, the 255 ceiling, dynamic
+Thirty-nine tests: the compiler (free text refused, reserved names, the 255 ceiling, dynamic
 feasibility, disabling by omission), the tool compiler (every enumerable shape, every unsupported
 reason, type coercion), the encoder (state shape, truncation order), the gate (thresholds by risk,
 weakest judgment, unstated optionals), the controller (every terminal reason, cancellation,
 continuation), the MCP environment (the order desk over stdio compiles to the same actions and
-ships the order) and the UHP server over HTTP (discovery, auth, versions, blocking and streamed
+ships the order), the browser (what a page is offered as, the actions on a served form, the MCP
+server compiling to the same space; skipped without Chrome) and the UHP server over HTTP (discovery, auth, versions, blocking and streamed
 tasks, continuation, cancel, delete). A recorded-answers provider stands in for the model, so the
 suite needs no key and runs in about two seconds.
 
@@ -351,7 +393,8 @@ Each is a milestone with a measurement attached, in the order they unlock each o
    `escalation_requested` or `no_confident_action` opens a door for a person or a System Two harness.
 2. Skills as an action: `load_skill` brings a named skill's text into the state for the steps that
    need it, since the state is capped and irrelevant state costs accuracy.
-3. A simulator and a mission-control page on the task stream, where the loop's latency is visible.
+3. A Chrome extension that is a plain protocol client: sign in, pick a harness, give a goal, watch
+   the actions stream, with the browser reached through Chrome's own agent connection.
 4. The `extended` conformance class.
 
 ## Sources

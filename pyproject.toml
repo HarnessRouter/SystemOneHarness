@@ -1,6 +1,6 @@
 [project]
 name = "systemone-harness"
-version = "0.1.1"
+version = "0.2.0"
 description = "A harness for System One models: a controller that drives an environment with a finite action space, one decision per step."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -8,7 +8,8 @@ license = { text = "Apache-2.0" }
 dependencies = ["httpx>=0.27", "pyyaml>=6.0"]
 
 [project.optional-dependencies]
-mcp = ["mcp>=1.28"]
+mcp = ["mcp>=2.1"]
+browser = ["browser-use>=0.13.10", "mcp>=2.1"]
 
 [project.scripts]
 s1 = "systemone_harness.cli:main"

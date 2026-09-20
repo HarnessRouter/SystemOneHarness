@@ -17,7 +17,7 @@ import time
 
 from .actions import ActionSpace
 from .controller import Controller
-from .envs import McpEnvironment, OrderWorkflow, StdioEnvironment
+from .envs import BrowserEnvironment, McpEnvironment, OrderWorkflow, StdioEnvironment
 from .provider import OpenRouterProvider, ProviderError, TypeSafeProvider, provider_from_env
 from .trace import Step
 
@@ -50,7 +50,18 @@ def _overlay(path: str | None) -> dict:
     return {k: d[k] for k in ("instructions", "gate", "escalate") if k in d}
 
 
+def _browser_env(a) -> BrowserEnvironment:
+    from .envs.browser_mcp import parse_texts
+    return BrowserEnvironment(cdp_url=a.cdp_url, headless=a.headless, start_url=a.start_url, text_values=parse_texts(a.text))
+
+
 def _env_and_space(a) -> tuple:
+    if getattr(a, "browser", False):
+        env = _browser_env(a)
+        space = BrowserEnvironment.action_space()
+        for k, v in _overlay(a.actions).items():
+            setattr(space, k, v)
+        return env, space
     if getattr(a, "mcp", None):
         env = McpEnvironment(_mcp_entry(a))
         cat = env.catalogue(**_overlay(a.actions))
@@ -67,7 +78,7 @@ def _env_and_space(a) -> tuple:
         env = OrderWorkflow(scenario)
         space = ActionSpace.from_yaml(a.actions) if a.actions else OrderWorkflow.action_space()
         return env, space
-    sys.exit(f"unknown --env {spec!r}; use order[:scenario], --env-cmd or --mcp")
+    sys.exit(f"unknown --env {spec!r}; use order[:scenario], --env-cmd, --mcp or --browser")
 
 
 def cmd_tools(a) -> int:
@@ -137,6 +148,12 @@ def cmd_serve(a) -> int:
         return TypeSafeProvider(ts_key, model.split("/")[-1])
 
     harnesses = []
+    if getattr(a, "browser", False):
+        from .envs.browser_mcp import parse_texts
+        texts, cdp, headless, start = parse_texts(a.text), a.cdp_url, a.headless, a.start_url
+        harnesses.append(HarnessDef(id="chrn_browser", name=a.name or "Browser", space=BrowserEnvironment.action_space(),
+                                    env_factory=lambda: BrowserEnvironment(cdp_url=cdp, headless=headless, start_url=start,
+                                                                           text_values=texts)))
     if getattr(a, "mcp", None):
         entry = _mcp_entry(a)
         probe = McpEnvironment(entry)
@@ -209,6 +226,14 @@ def cmd_bench(a) -> int:
     return 0
 
 
+def _browser_args(p) -> None:
+    p.add_argument("--browser", action="store_true", help="a web page as the environment, on Browser Use")
+    p.add_argument("--cdp-url", help="attach to a running Chrome (chrome://inspect or --remote-debugging-port)")
+    p.add_argument("--headless", action="store_true", help="launch a headless Chrome instead of attaching")
+    p.add_argument("--start-url", help="the page to open when a run starts")
+    p.add_argument("--text", action="append", metavar="NAME=VALUE", help="a value the model may type by name, repeatable")
+
+
 def _mcp_args(p) -> None:
     p.add_argument("--mcp", help="an MCP server as the environment: a command (stdio) or a URL")
     p.add_argument("--mcp-transport", choices=["sse", "http"], help="for a URL; streamable HTTP unless sse")
@@ -228,6 +253,7 @@ def main(argv=None) -> int:
     r.add_argument("--env-cmd", help="a command that speaks the stdio environment protocol")
     r.add_argument("--actions", help="an action space YAML (required with --env-cmd; instructions and gate overlay with --mcp)")
     _mcp_args(r)
+    _browser_args(r)
     r.add_argument("--model")
     r.add_argument("--max-steps", type=int, default=100)
     r.add_argument("--timeout", type=float)
@@ -241,6 +267,7 @@ def main(argv=None) -> int:
     s.add_argument("--env-cmd")
     s.add_argument("--name")
     _mcp_args(s)
+    _browser_args(s)
     s.set_defaults(fn=cmd_serve)
     t = sub.add_parser("tools", help="show what an MCP server's tools compile to")
     _mcp_args(t)

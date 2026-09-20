@@ -21,11 +21,11 @@ A = ACTION_SPACE["actions"]
 def build(scenario: str):
     import warnings
     warnings.filterwarnings("ignore", message=".*lifespan.*")     # the SDK's own settings model, not ours
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.mcpserver import MCPServer
     from mcp.types import ToolAnnotations
 
     env = OrderWorkflow(scenario)
-    m = FastMCP("order-desk", instructions=ACTION_SPACE["instructions"], log_level="WARNING")
+    m = MCPServer("order-desk", instructions=ACTION_SPACE["instructions"], log_level="WARNING")
 
     def choices(action: str, param: str) -> list[dict]:
         return [{"const": k, "description": v} for k, v in A[action]["params"][param]["choices"].items()]

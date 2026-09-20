@@ -177,6 +177,12 @@ class Server:
             session.running = rid
             session.last_response_id = rid
         provider = self._provider(model)
+        # `metadata` pairs named value:<name> are the values the environment may type for this task
+        # (a form's name, an email), given by the client per task rather than fixed at serve time.
+        # The model picks a value by its name and never sees a value it was not offered.
+        values = {k[len("value:"):]: str(v) for k, v in meta.items() if k.startswith("value:") and k[len("value:"):]}
+        if values and hasattr(session.env, "text_values"):
+            session.env.text_values.update(values)
         controller = Controller(hdef.space, session.env, provider,
                                 max_steps=int(body.get("max_step") or hdef.max_step or 100),
                                 timeout_seconds=body.get("timeout_seconds") or hdef.timeout_seconds,

@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "System One Harness",
+  "version": "0.2.0",
+  "description": "Run a goal on a System One harness and watch the loop act, step by step, from a side panel.",
+  "action": { "default_title": "System One Harness" },
+  "side_panel": { "default_path": "sidepanel.html" },
+  "background": { "service_worker": "background.js" },
+  "permissions": ["sidePanel", "storage"],
+  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*", "https://*/*"],
+  "icons": { "128": "icon128.png" }
+}

@@ -195,3 +195,21 @@ def test_delete_forgets_the_record(base):
     assert r.status_code == 200 and r.json() == {"id": done["id"], "object": "response", "deleted": True}
     assert httpx.get(base + f"/v1/responses/{done['id']}", headers=H).status_code == 404
     assert httpx.get(base + "/nowhere", headers=H).status_code == 404
+
+
+def test_values_in_metadata_reach_an_environment_that_types(base):
+    """A client gives the values a page may need per task, as metadata pairs named value:<name>;
+    they land on the session's environment when it has a text_values dict, and nowhere otherwise."""
+    from systemone_harness.uhp import Server, HarnessDef
+    from systemone_harness.envs import OrderWorkflow
+
+    class Typing(OrderWorkflow):
+        def __init__(self):
+            super().__init__("cancel_fraud")
+            self.text_values = {}
+
+    srv = Server([HarnessDef(id="chrn_t", name="t", space=OrderWorkflow.action_space(), env_factory=Typing)],
+                 lambda m: RecordedProvider(perfect), {KEY})
+    task = srv.create({"input": "Cancel it.", "metadata": {"harness_id": "chrn_t", "value:name": "Richard", "value:": "x", "other": "y"}})
+    task.done.wait(10)
+    assert task.session.env.text_values == {"name": "Richard"}

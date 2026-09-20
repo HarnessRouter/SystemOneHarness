@@ -401,6 +401,34 @@ gate. The rule for an environment: state the goal's own predicates outright, eve
 the ones that are false. The gate is never tuned to fit the environment; the environment is made
 legible to the model.
 
+### 7.4 The browser, on Browser Use (0.2.0)
+
+A web page is the environment everyone wants first, and the open-source Browser Use project
+already does the two hard parts without a screenshot: it reads the page into an indexed
+representation, every control numbered with its role and name, and it executes by index over the
+Chrome DevTools Protocol. `envs/browser.py` puts the state definition convention on top: the
+numbered controls become candidate lists (controls to click, text fields, dropdown options, tabs),
+the operations become nine actions (click, type_text, select_option, press_key, hold_key, scroll,
+go_back, switch_tab, wait), and the text a form needs comes from the caller as named values the
+model picks by name and never writes. `hold_key` is the one primitive Browser Use lacks, a key held
+for a duration over the protocol, so a page that listens to the keyboard is in reach without any
+page-specific code. The same environment is served as an MCP server (`envs/browser_mcp.py`, stdio
+or streamable HTTP) and compiles to the identical action space (tested).
+
+Measured 2026-09-19 on the live model: a booking form (name, time, window seat, submit) completed
+in four actions in three runs of three, 4.6 to 5.2 s each, at 150 to 315 ms a model step. Getting
+there took three changes to the state and none to the gate, each measured in docs/browser-use.md:
+a dropdown reachable through `select_option` alone (two routes to one act had split the belief),
+"take the controls in page order" in the instructions (two correct next steps had halved each
+other), and one line stating what is set so far with the dropdown's chosen value read from the
+live node (a value inside a control's markup was not read as done).
+
+The honest boundary: a page drawn on a canvas gives a DOM observation nothing but its DOM. On the
+Super Mario page the model saw the score line, held the right arrow nine times at 0.9, and the
+loop stopped when the observation stopped changing. Driving such a page well needs the page's own
+state as text, which is a page-side adapter (the state definition convention for that page), not
+something a general browser environment can invent.
+
 ## 8. UHP
 
 ### 8.1 Can it be conformant
