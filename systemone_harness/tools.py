@@ -9,8 +9,9 @@ The convention a server follows to be an environment:
 
   observe            a tool returning {"text", "fields", "candidates", "terminal"}; called every step
   reset              a tool taking {"goal"}; called when a run starts (optional)
-  every other tool   an action. Its description is what the model reads. Its risk comes from the
-                     MCP annotations: readOnlyHint -> read, destructiveHint -> destructive, else write.
+  every other tool   an action. Its description is what the model reads. Its risk is `meta.risk`
+                     when the tool declares one (read, write, destructive), else from the MCP
+                     annotations: readOnlyHint -> read, destructiveHint -> destructive, else write.
 
 A parameter compiles when its schema is one of:
 
@@ -27,7 +28,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .actions import ESCALATE, FINISH, GOAL_REACHED, NEXT_ACTION, MAX_OPTIONS, ActionSpace, ActionSpaceError
+from .actions import ESCALATE, FINISH, GOAL_REACHED, MAX_OPTIONS, NEXT_ACTION, RISKS, ActionSpace, ActionSpaceError
 
 OBSERVE = "observe"
 RESET = "reset"
@@ -62,7 +63,14 @@ class ToolCatalogue:
         return "\n".join(lines)
 
 
-def _risk(annotations: dict | None) -> str:
+def _risk(annotations: dict | None, meta: dict | None = None) -> str:
+    """The action's risk level. A tool may say it outright in its MCP `meta` as `risk`: read, write
+    or destructive (a key held for a moment in a game changes nothing outside the game, and
+    "write" would gate it like a form submission); otherwise the MCP annotations decide, readOnlyHint
+    for read and destructiveHint for destructive, and write is the default."""
+    declared = str((meta or {}).get("risk") or "").lower()
+    if declared in RISKS:
+        return declared
     a = annotations or {}
     if a.get("readOnlyHint"):
         return "read"
@@ -135,7 +143,7 @@ def compile_tools(tools: list[dict], instructions: str = "", gate: dict | None =
             unsupported[name] = str(exc)
             continue
         actions[name] = {"description": str(t.get("description") or t.get("title") or name).strip(),
-                         "risk": _risk(t.get("annotations")), "params": params}
+                         "risk": _risk(t.get("annotations"), t.get("meta")), "params": params}
         schemas[name] = schema
     if not actions:
         raise ActionSpaceError("no tool compiled to an action" + (f"; unsupported: {unsupported}" if unsupported else ""))

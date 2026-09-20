@@ -59,3 +59,13 @@ def test_answers_are_coerced_to_the_declared_types_and_unstated_optionals_left_o
                              "name": {"type": "string"}}}
     assert coerce({"level": "2", "fast": "true", "ratio": "0.5", "name": "x", "skip": None}, schema) == \
         {"level": 2, "fast": True, "ratio": 0.5, "name": "x"}
+
+
+def test_a_tool_may_declare_its_risk_in_its_meta():
+    """A key held for a moment in a game changes nothing outside the game; gated as a write it was
+    refused three times mid-air and the run stopped (2026-09-19). The tool says its risk."""
+    cat = compile_tools([tool("observe"),
+                         dict(tool("hop"), meta={"risk": "read"}),
+                         dict(tool("erase", annotations={"readOnlyHint": True}), meta={"risk": "destructive"}),
+                         dict(tool("odd"), meta={"risk": "reckless"})])
+    assert {n: a.risk for n, a in cat.space.actions.items()} == {"hop": "read", "erase": "destructive", "odd": "write"}

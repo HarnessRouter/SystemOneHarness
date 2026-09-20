@@ -103,7 +103,7 @@ class McpEnvironment(Environment):
                 self.instructions = str(getattr(client, "instructions", None) or "")
                 listed = await client.list_tools()
                 self.tools = [{"name": t.name, "description": t.description or "", "title": t.title,
-                               "inputSchema": t.input_schema or {},
+                               "inputSchema": t.input_schema or {}, "meta": dict(getattr(t, "meta", None) or {}),
                                "annotations": t.annotations.model_dump(exclude_none=True, by_alias=True) if t.annotations else None}
                               for t in listed.tools]
                 self._client = client

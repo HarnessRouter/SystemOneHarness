@@ -97,17 +97,36 @@ def parse_texts(items) -> dict:
     return out
 
 
+def parse_cells(spec: str) -> tuple[int, int]:
+    cols, _, rows = str(spec).lower().partition("x")
+    return int(cols), int(rows)
+
+
+def browser_kwargs(a) -> dict:
+    """The environment's constructor arguments from the shared command-line flags."""
+    canvas = getattr(a, "canvas", None)
+    return {"cdp_url": a.cdp_url, "headless": a.headless, "start_url": a.start_url, "text_values": parse_texts(a.text),
+            "canvas": (True if canvas == "auto" else canvas) if canvas else False,
+            "canvas_cells": parse_cells(getattr(a, "canvas_cells", "64x32") or "64x32"),
+            "canvas_colors": int(getattr(a, "canvas_colors", 12) or 12),
+            "canvas_legend": parse_texts(getattr(a, "canvas_legend", None))}
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="browser_mcp", description="The browser environment as an MCP server.")
     p.add_argument("--cdp-url", default=os.environ.get("S1_CDP_URL") or None, help="attach to a running Chrome")
     p.add_argument("--headless", action="store_true", help="launch a headless Chrome instead")
     p.add_argument("--start-url", default=os.environ.get("S1_START_URL") or None)
     p.add_argument("--text", action="append", metavar="NAME=VALUE", help="a value the model may type by name, repeatable")
+    p.add_argument("--canvas", nargs="?", const="auto", metavar="SELECTOR", help="canvas mode (the largest canvas, or a selector)")
+    p.add_argument("--canvas-cells", default="64x32", metavar="COLSxROWS")
+    p.add_argument("--canvas-colors", type=int, default=12)
+    p.add_argument("--canvas-legend", action="append", metavar="#HEX=NAME")
     p.add_argument("--http", action="store_true", help="serve streamable HTTP instead of stdio")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8720)
     a = p.parse_args(argv)
-    env = BrowserEnvironment(cdp_url=a.cdp_url, headless=a.headless, start_url=a.start_url, text_values=parse_texts(a.text))
+    env = BrowserEnvironment(**browser_kwargs(a))
     m = build(env)
     try:
         if a.http:

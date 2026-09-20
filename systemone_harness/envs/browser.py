@@ -78,7 +78,137 @@ ACTION_SPACE: dict = {
 }
 
 
+CANVAS_ALPHABET = ".abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+# Runs in the page. Finds the canvas, draws it scaled onto an offscreen canvas of cols x rows (the
+# browser's own box sampling), reads the pixels back, quantises each to 4 bits a channel, keeps the
+# K most common colours and maps every other pixel to the nearest kept one. One character per cell,
+# '.' for the most common colour, which is nearly always the background.
+_CANVAS_JS = """(function(cols, rows, maxColors, selector, keep){
+  var cs = selector ? [document.querySelector(selector)] : Array.prototype.slice.call(document.querySelectorAll('canvas'));
+  cs = cs.filter(function(c){ return c && c.width > 0 && c.height > 0; });
+  cs.sort(function(a, b){ return b.width * b.height - a.width * a.height; });
+  var c = cs[0];
+  if (!c) return null;
+  var off = document.createElement('canvas'); off.width = cols; off.height = rows;
+  var ctx = off.getContext('2d', {willReadFrequently: true});
+  ctx.imageSmoothingEnabled = true;
+  try { ctx.drawImage(c, 0, 0, cols, rows); } catch (e) { return {error: String(e)}; }
+  var d = ctx.getImageData(0, 0, cols, rows).data;
+  var n = cols * rows, keys = new Array(n), counts = {};
+  for (var i = 0; i < n; i++) {
+    var k = ((d[i*4] >> 4) << 8) | ((d[i*4+1] >> 4) << 4) | (d[i*4+2] >> 4);
+    keys[i] = k; counts[k] = (counts[k] || 0) + 1;
+  }
+  var all = Object.keys(counts).map(function(k){ return [parseInt(k, 10), counts[k]]; });
+  all.sort(function(a, b){ return b[1] - a[1]; });
+  // colours the operator named come first, each as the nearest colour actually on the canvas
+  // (within the 4-bit quantisation), then the most common colours up to the palette size
+  var top = [], used = {};
+  (keep || []).forEach(function(want){
+    var wr = want >> 8, wg = (want >> 4) & 15, wb = want & 15, best = null, bd = 1e9;
+    all.forEach(function(e){ var q = e[0], r = q >> 8, g = (q >> 4) & 15, b = q & 15;
+      var dd = (r-wr)*(r-wr) + (g-wg)*(g-wg) + (b-wb)*(b-wb); if (dd < bd) { bd = dd; best = e; } });
+    if (best && bd <= 3 && !used[best[0]]) { top.push(best); used[best[0]] = 1; }
+  });
+  for (var a = 0; a < all.length && top.length < maxColors; a++) { if (!used[all[a][0]]) { top.push(all[a]); used[all[a][0]] = 1; } }
+  top.sort(function(a, b){ return b[1] - a[1]; });
+  var alphabet = %ALPHABET%;
+  var map = {};
+  for (var t = 0; t < top.length; t++) map[top[t][0]] = alphabet[t];
+  function nearest(k){
+    var r = k >> 8, g = (k >> 4) & 15, b = k & 15, best = top[0][0], bd = 1e9;
+    for (var t = 0; t < top.length; t++) {
+      var q = top[t][0], tr = q >> 8, tg = (q >> 4) & 15, tb = q & 15;
+      var dd = (r-tr)*(r-tr) + (g-tg)*(g-tg) + (b-tb)*(b-tb);
+      if (dd < bd) { bd = dd; best = q; }
+    }
+    return best;
+  }
+  var lines = [];
+  for (var y = 0; y < rows; y++) {
+    var line = '';
+    for (var x = 0; x < cols; x++) { var kk = keys[y*cols + x]; if (!(kk in map)) { kk = nearest(kk); keys[y*cols + x] = kk; } line += map[kk]; }
+    lines.push(line);
+  }
+  function hex(k){ return '#' + [k >> 8, (k >> 4) & 15, k & 15].map(function(v){ return (v * 17).toString(16).padStart(2, '0'); }).join(''); }
+  var legend = top.map(function(e, i){ return {ch: alphabet[i], hex: hex(e[0]), share: Math.round(1000 * e[1] / n) / 10}; });
+  return {cols: cols, rows: rows, width: c.width, height: c.height, lines: lines, legend: legend};
+})""".replace("%ALPHABET%", repr(CANVAS_ALPHABET))
+
+
+def _hex_rgb(h: str) -> tuple[int, int, int]:
+    h = h.strip().lstrip("#")
+    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
+def name_legend(legend: list[dict], names: dict[str, str] | None) -> list[dict]:
+    """Attach operator-given names to the sampled colours: each name's colour goes to the nearest
+    sampled colour within a distance that survives the 4-bit quantisation. The names are
+    configuration, never code, and they are the only way a colour means 'the player'."""
+    if not names:
+        return legend
+    out = [dict(e) for e in legend]
+    for hx, name in names.items():
+        try:
+            r, g, b = _hex_rgb(hx)
+        except ValueError:
+            continue
+        best, bd = None, 10 ** 9
+        for e in out:
+            er, eg, eb = _hex_rgb(e["hex"])
+            dd = (r - er) ** 2 + (g - eg) ** 2 + (b - eb) ** 2
+            if dd < bd:
+                best, bd = e, dd
+        if best is not None and bd <= 3 * (24 ** 2):
+            best["name"] = name
+    return out
+
+
+def named_clusters(lines: list[str], legend: list[dict], max_clusters: int = 6) -> list[str]:
+    """Where each named colour's cells are, as horizontal clusters: "player at columns 12 to 13,
+    rows 12 to 13". A grid is a picture the model would have to scan; a named thing's place is a
+    fact it can read. Cells of one colour more than two columns apart are different things."""
+    out: list[str] = []
+    for e in legend:
+        name, ch = e.get("name"), e.get("ch")
+        if not name or not ch:
+            continue
+        cols: dict[int, list[int]] = {}
+        for r, line in enumerate(lines):
+            for c, x in enumerate(line):
+                if x == ch:
+                    cols.setdefault(c, []).append(r)
+        if not cols:
+            out.append(f"{name}: not on screen")
+            continue
+        clusters: list[list[int]] = []
+        for c in sorted(cols):
+            if clusters and c - clusters[-1][-1] <= 2:
+                clusters[-1].append(c)
+            else:
+                clusters.append([c])
+        parts = []
+        for cl in clusters[:max_clusters]:
+            rows = [r for c in cl for r in cols[c]]
+            span = f"column {cl[0]}" if cl[0] == cl[-1] else f"columns {cl[0]} to {cl[-1]}"
+            rspan = f"row {min(rows)}" if min(rows) == max(rows) else f"rows {min(rows)} to {max(rows)}"
+            parts.append(f"{span}, {rspan}")
+        more = f" and {len(clusters) - max_clusters} more" if len(clusters) > max_clusters else ""
+        out.append(f"{name} at " + "; ".join(parts) + more)
+    return out
+
+
 def default_chrome() -> str | None:
+    """A Chrome to launch: a Playwright-installed Chromium (PLAYWRIGHT_BROWSERS_PATH, or the user's
+    cache), else a system Chrome."""
+    import glob
+    for root in (os.environ.get("PLAYWRIGHT_BROWSERS_PATH"), os.path.expanduser("~/.cache/ms-playwright")):
+        if not root:
+            continue
+        for pat in ("chromium-*/chrome-linux*/chrome", "chromium-*/chrome-mac*/Chromium.app/Contents/MacOS/Chromium"):
+            hits = sorted(glob.glob(os.path.join(root, pat)))
+            if hits:
+                return hits[-1]
     for p in ("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
               "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser"):
         if os.path.exists(p):
@@ -90,12 +220,21 @@ class BrowserEnvironment(Environment):
     def __init__(self, cdp_url: str | None = None, executable_path: str | None = None, headless: bool = False,
                  start_url: str | None = None, text_values: dict[str, str] | None = None,
                  max_elements: int = 200, text_chars: int = 3000, timeout: float = 120.0,
-                 user_data_dir: str | None = None):
+                 user_data_dir: str | None = None, canvas: bool | str = False, canvas_cells: tuple[int, int] = (64, 32),
+                 canvas_colors: int = 12, canvas_legend: dict[str, str] | None = None):
+        """`canvas`: False, True (the largest canvas on the page) or a CSS selector. `canvas_cells` is
+        the sample rate, columns by rows; `canvas_colors` the palette size; `canvas_legend` names
+        for colours ({"#c84c0c": "ground"}), the operator's knowledge of the page and the only way
+        a colour means anything to the model."""
         import importlib
         importlib.import_module("browser_use")     # the optional dependency, checked where it is needed
         self.cdp_url, self.executable_path, self.headless = cdp_url, executable_path, headless
         self.start_url, self.text_values = start_url, dict(text_values or {})
         self.max_elements, self.text_chars, self.timeout, self.user_data_dir = max_elements, text_chars, timeout, user_data_dir
+        self.canvas, self.canvas_cells, self.canvas_colors = canvas, tuple(canvas_cells), int(canvas_colors)
+        self.canvas_legend = dict(canvas_legend or {})
+        if self.canvas and not (2 <= self.canvas_colors <= len(CANVAS_ALPHABET)):
+            raise ValueError(f"canvas_colors must be 2 to {len(CANVAS_ALPHABET)}")
         self._session = None
         self._tools = None
         self._action_model = None
@@ -168,6 +307,25 @@ class BrowserEnvironment(Environment):
             pass
         return out
 
+    async def _sample_canvas(self) -> dict | None:
+        cols, rows = self.canvas_cells
+        selector = self.canvas if isinstance(self.canvas, str) else ""
+        cdp = await self._session.get_or_create_cdp_session()
+        keep = []
+        for hx in self.canvas_legend:
+            try:
+                r, g, b = _hex_rgb(hx)
+                keep.append(((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4))
+            except ValueError:
+                continue
+        expr = f"({_CANVAS_JS})({int(cols)}, {int(rows)}, {self.canvas_colors}, {selector!r}, {keep!r})"
+        r = await cdp.cdp_client.send.Runtime.evaluate(params={"expression": expr, "returnByValue": True}, session_id=cdp.session_id)
+        val = (r.get("result") or {}).get("value")
+        if not isinstance(val, dict) or "lines" not in val:
+            return None
+        val["legend"] = name_legend(val["legend"], self.canvas_legend)
+        return val
+
     async def _observe(self) -> Observation:
         await self._start()
         st = await self._session.get_browser_state_summary(include_screenshot=False)
@@ -238,8 +396,18 @@ class BrowserEnvironment(Environment):
             # what is set, stated outright and in one place: the model reads literally, and a value
             # only visible inside a control's markup was not read as done (measured 2026-09-19)
             text += "\nSet so far: " + "; ".join(settings) + "."
+        canvas = await self._sample_canvas() if self.canvas else None
+        if canvas:
+            legend = ", ".join(f"'{e['ch']}' = {e['hex']}" + (f" ({e['name']})" if e.get("name") else "") + f" {e['share']}%"
+                               for e in canvas["legend"])
+            text += (f"\nCanvas {canvas['cols']}x{canvas['rows']} cells sampled from {canvas['width']}x{canvas['height']} px, "
+                     f"one character per cell, row 0 at the top, column 0 at the left. Legend: {legend}.")
+            places = named_clusters(canvas["lines"], canvas["legend"])
+            if places:
+                text += "\nOn the canvas: " + "; ".join(places) + "."
         fields = {"url": st.url, "title": st.title, "controls": len(elements), "tabs": len(tabs),
                   "set": settings,
+                  **({"canvas": canvas["lines"]} if canvas else {}),
                   "pixels_above": int(getattr(st, "pixels_above", 0) or 0),
                   "pixels_below": int(getattr(st, "pixels_below", 0) or 0)}
         return Observation(text=text, fields=fields, candidates=candidates)

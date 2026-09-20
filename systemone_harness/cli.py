@@ -51,8 +51,8 @@ def _overlay(path: str | None) -> dict:
 
 
 def _browser_env(a) -> BrowserEnvironment:
-    from .envs.browser_mcp import parse_texts
-    return BrowserEnvironment(cdp_url=a.cdp_url, headless=a.headless, start_url=a.start_url, text_values=parse_texts(a.text))
+    from .envs.browser_mcp import browser_kwargs
+    return BrowserEnvironment(**browser_kwargs(a))
 
 
 def _env_and_space(a) -> tuple:
@@ -149,11 +149,10 @@ def cmd_serve(a) -> int:
 
     harnesses = []
     if getattr(a, "browser", False):
-        from .envs.browser_mcp import parse_texts
-        texts, cdp, headless, start = parse_texts(a.text), a.cdp_url, a.headless, a.start_url
+        from .envs.browser_mcp import browser_kwargs
+        kw = browser_kwargs(a)
         harnesses.append(HarnessDef(id="chrn_browser", name=a.name or "Browser", space=BrowserEnvironment.action_space(),
-                                    env_factory=lambda: BrowserEnvironment(cdp_url=cdp, headless=headless, start_url=start,
-                                                                           text_values=texts)))
+                                    env_factory=lambda: BrowserEnvironment(**kw)))
     if getattr(a, "mcp", None):
         entry = _mcp_entry(a)
         probe = McpEnvironment(entry)
@@ -232,6 +231,11 @@ def _browser_args(p) -> None:
     p.add_argument("--headless", action="store_true", help="launch a headless Chrome instead of attaching")
     p.add_argument("--start-url", help="the page to open when a run starts")
     p.add_argument("--text", action="append", metavar="NAME=VALUE", help="a value the model may type by name, repeatable")
+    p.add_argument("--canvas", nargs="?", const="auto", metavar="SELECTOR",
+                   help="canvas mode: the largest canvas (or this selector) sampled into the state as a character grid")
+    p.add_argument("--canvas-cells", default="64x32", metavar="COLSxROWS", help="the sample rate (default 64x32)")
+    p.add_argument("--canvas-colors", type=int, default=12, help="palette size, 2 to 63 (default 12)")
+    p.add_argument("--canvas-legend", action="append", metavar="#HEX=NAME", help="a colour's name, repeatable (#c84c0c=ground)")
 
 
 def _mcp_args(p) -> None:
