@@ -360,21 +360,46 @@ irrelevant state degrades accuracy, so skills are not concatenated into every re
 
 An MCP tool is a function with a JSON-schema input and a text-producing call loop; a System One
 model can neither compose the arguments as text nor stream a call. Richard's proposal to block the
-tool-call protocol and compile tools into state definitions is the design:
+tool-call protocol and compile tools into state definitions is the design, and it shipped as the
+`McpEnvironment` adapter and the `compile_tools` compiler (0.1.0, 2026-09-19):
 
-1. At configuration time the harness lists the server's tools once.
-2. Each tool whose input schema is fully enumerable compiles to an action: `enum` becomes a
-   `choice`, `boolean` a `noul`, a bounded integer a `score` over buckets, an `array` of enums a set
-   of nouls. A string parameter compiles only when the declaration maps it to a candidate list from
-   the state (`from:`), otherwise the tool is recorded as `unsupported: needs free text` in the
-   harness's tool catalogue, visible to the operator, never silently dropped.
-3. At run time the environment invokes the MCP tool with the filled arguments and returns its
-   result text as the step's observation. The MCP client is the harness's, not the model's.
-4. `disabledTools` is enforced by omission from the action space, which is as hard as enforcement
+1. At configuration time the harness opens the server once, reads its `instructions` (the MCP
+   initialize result; they become the harness instructions) and lists its tools.
+2. Two tools are the protocol: `observe`, returning `{text, fields, candidates, terminal}`, called
+   every step; and `reset`, taking `{goal}`, called when a run starts. Every other tool is an
+   action. Its description is what the model reads; its risk is the MCP annotation, `readOnlyHint`
+   for read, `destructiveHint` for destructive, write otherwise.
+3. A parameter compiles when its schema is enumerable: `enum` becomes a choice; `oneOf` of
+   `{const, description}` a choice with meanings; `boolean` a flag; an `integer` with `minimum` and
+   `maximum` over ten values or fewer becomes levels; a string carrying `"x-candidates": "<list>"`
+   draws its choices from that candidate list in the observation each step. A parameter absent from
+   `required` is optional and takes its schema default when the model does not state it. Anything
+   else (a free string, an array, an object) makes the tool `unsupported` with the reason in the
+   catalogue, visible to the operator (`s1 tools`), never silently dropped.
+4. At run time the harness holds the MCP client. The chosen action is one tool call with the
+   model's answers coerced to the schema's types; the result's structured content or text becomes
+   the step's result; a `terminal` flag ends the run. The order desk served this way
+   (`envs/order_mcp.py`) compiles to the same action space as the YAML, byte for byte, and sends the
+   model the same state as the in-process environment at every step (tested).
+5. `disabledTools` is enforced by omission from the action space, which is as hard as enforcement
    gets: the model cannot choose what it was never offered.
 
 This keeps every UHP promise about tools (§4.1 and §4.3 of the Harnesses chapter) and states the
-one it cannot keep, in the catalogue, where a client can read it.
+one it cannot keep, in the catalogue, where a client can read it. Under HarnessRouter the harness
+configuration's `mcpServers` is therefore the environment, and the demo's simulator is one more
+MCP server following the convention.
+
+### 7.3 What the observation must say, measured
+
+The model reads literally. On 2026-09-19 the order desk's observation said "packed" and named the
+carrier but never said "not shipped"; at the ship step the model put a tenth of its belief on
+`finish`, answered the goal-reached question near 0.2, and its probability on `ship` sat at 0.73 to
+0.84 against the 0.8 destructive gate. Two runs in five ended in `no_confident_action`. Adding
+"Shipped: no. Cancelled: no." to the text and the same two fields to the observation moved
+goal-reached to about 0.1 and `ship` to 0.86 to 0.93, five runs in five, with no change to the
+gate. The rule for an environment: state the goal's own predicates outright, every step, including
+the ones that are false. The gate is never tuned to fit the environment; the environment is made
+legible to the model.
 
 ## 8. UHP
 

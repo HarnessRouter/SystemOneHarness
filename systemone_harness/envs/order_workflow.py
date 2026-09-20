@@ -105,14 +105,18 @@ class OrderWorkflow(Environment):
         o = self.order
         unpicked = [i["name"] for i in o["items"] if not i["picked"]]
         picked = [i["name"] for i in o["items"] if i["picked"]]
-        text = (f"Order {o['order_id']} is {o['status']}. Picked: {picked or 'none'}. "
+        # the goal's own predicates, stated outright: the model reads literally, and "packed" alone left
+        # it a tenth of its belief that the order was already shipped (measured 2026-09-19)
+        shipped, cancelled = o["status"] == "shipped", o["status"] == "cancelled"
+        text = (f"Order {o['order_id']} is {o['status']}. Shipped: {'yes' if shipped else 'no'}. "
+                f"Cancelled: {'yes' if cancelled else 'no'}. Picked: {picked or 'none'}. "
                 f"Unpicked: {unpicked or 'none'}. Packed: {o['packed']}. Carrier: {o['carrier'] or 'none'}. "
                 f"Notes: {o['notes'] or 'none'}.")
         candidates: dict = {"carriers": dict(CARRIERS)}
         if unpicked:
             candidates["unpicked_items"] = unpicked
         return Observation(text=text, fields={"order_id": o["order_id"], "status": o["status"],
-                                              "picked": picked, "unpicked": unpicked, "packed": o["packed"],
+                                              "shipped": shipped, "cancelled": cancelled, "picked": picked, "unpicked": unpicked, "packed": o["packed"],
                                               "carrier": o["carrier"], "notes": list(o["notes"])},
                            candidates=candidates, terminal=o["status"] in ("shipped", "cancelled"))
 

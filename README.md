@@ -19,9 +19,9 @@ The design, with the measurements it rests on, is in [docs/design.md](docs/desig
 |---|---|
 | Version | 0.1.0, the first loop |
 | Unified Harness Protocol | conformant at `core`, 40 of 40 checks, suite 2026.9.12.post1 ([report](docs/reports/uhp-conformance-core-2026-09-19.json)) |
-| Built-in benchmark | 15 of 15 goals met on the live model ([numbers](#benchmark)) |
+| Built-in benchmark | 15 of 15 goals met on the live model, in process and over MCP ([numbers](#benchmark)) |
 | Models | `~typesafe/jev-latest` and `typesafe/jev-1.13` on OpenRouter; `jev-latest` on TypeSafe directly |
-| Python | 3.10 or newer; depends on `httpx` and `pyyaml` only |
+| Python | 3.10 or newer; depends on `httpx` and `pyyaml`; `pip install -e .[mcp]` adds the MCP environment |
 
 ## Quickstart
 
@@ -190,12 +190,70 @@ In Python, subclass `Environment` and implement `observe()` and `execute(action,
 and `close` are optional. The built-in `OrderWorkflow` in `systemone_harness/envs/order_workflow.py`
 is the reference: the action-space declaration, three scenarios and the state machine in under two hundred lines.
 
+One rule for any environment, measured on the built-in one: state the goal's own predicates
+outright, every step, including the false ones. The model reads literally. When the order desk said
+"packed" but never "not shipped", the model kept a tenth of its belief on the order being finished
+and its confidence on `ship` fell to the gate; saying "Shipped: no" moved it clear. Details are in
+the design document.
+
+## An MCP server as the environment
+
+Any MCP server can be the environment, with no action-space file: the harness lists the server's
+tools once and compiles them into actions. This is how the harness plugs into a host that
+configures environments as MCP servers, such as HarnessRouter.
+
+```sh
+pip install -e ".[mcp]"
+s1 tools --mcp "python -m systemone_harness.envs.order_mcp"
+s1 run   --mcp "python -m systemone_harness.envs.order_mcp --scenario ship_fastest_gift" \
+         --goal "Order B-220 is a gift: note it, then ship it by the fastest carrier."
+s1 serve --mcp https://host/mcp --mcp-header "Authorization: Bearer ..." --name booking --api-key ...
+```
+
+The convention a server follows, the "state definition" protocol:
+
+| the server declares | the harness makes of it |
+|---|---|
+| a tool named `observe` returning `{text, fields, candidates, terminal}` | the observation, called every step |
+| a tool named `reset` taking `{goal}` | the start of a run (optional) |
+| every other tool | an action; its description is what the model reads |
+| `readOnlyHint` / `destructiveHint` annotations | the action's risk: read, destructive, else write |
+| a parameter with `enum` | a choice over the values |
+| a parameter with `oneOf: [{const, description}]` | a choice over the values, each with its meaning |
+| a `boolean` parameter | a yes/no flag |
+| an `integer` with `minimum` and `maximum`, ten values or fewer | levels |
+| a string parameter with `"x-candidates": "<list>"` | a choice over that candidate list in the observation |
+| a parameter not in `required` | optional; its schema default applies when unstated |
+| the server's `instructions` | the harness instructions (a YAML passed as `--actions` may override instructions and gate) |
+
+A tool whose parameters cannot be answered this way (a free string, an array, an object) is not an
+action. It is listed as unsupported with the reason, by `s1 tools` and in the served catalogue,
+never dropped in silence. The order desk served this way:
+
+```
+$ s1 tools --mcp "python -m systemone_harness.envs.order_mcp"
+6 actions, 0 unsupported
+  pick_item                write        item: candidates
+  pack                     write        (no parameters)
+  choose_carrier           write        carrier: candidates
+  ship                     destructive  (no parameters)
+  cancel_order             destructive  reason: choices
+  add_note                 read         note: choices
+  protocol: observe=observe reset=reset
+```
+
+It compiles to the same action space as the YAML, and the model receives the same state at every
+step as it does from the in-process environment; a test checks both. The server itself is fifty
+lines over the official MCP SDK (`systemone_harness/envs/order_mcp.py`) and is the pattern for any
+simulator or real surface you want the loop to drive.
+
 ## The command line
 
 ```
-s1 run    [--goal TEXT] [--env order[:scenario]] [--env-cmd CMD --actions YAML]
+s1 run    [--goal TEXT] [--env order[:scenario]] [--env-cmd CMD --actions YAML] [--mcp CMD_OR_URL]
           [--model ID] [--max-steps N] [--timeout SECONDS] [--json TRACE_PATH]
-s1 serve  --api-key KEY [--host HOST] [--port PORT] [--actions YAML --env-cmd CMD --name NAME]
+s1 tools  --mcp CMD_OR_URL [--mcp-transport sse|http] [--mcp-header "Name: value"] [--actions YAML] [--json PATH]
+s1 serve  --api-key KEY [--host HOST] [--port PORT] [--actions YAML --env-cmd CMD --name NAME | --mcp ... --name NAME]
 s1 bench  [--runs N] [--model ID] [--max-steps N] [--json PATH]
 ```
 
@@ -207,7 +265,7 @@ result, the latency and the usage.
 
 `s1 serve` exposes the loop as a [UHP](https://unifiedharnessprotocol.org) server, so any UHP
 client can drive it without knowing what is inside. The built-in scenarios are served as three
-harnesses, and `--actions` with `--env-cmd` adds yours.
+harnesses; `--mcp` or `--actions` with `--env-cmd` adds yours.
 
 ```sh
 export OPENROUTER_API_KEY=sk-or-...
@@ -245,11 +303,11 @@ classes (files, session listing, harness management) are not claimed.
 `s1 bench` runs the built-in scenarios against the live model and prints the numbers. Five runs per
 scenario on 2026-09-19, model `typesafe/jev-1.13-20260917` through OpenRouter:
 
-| scenario | runs | goal met | steps (mean) | ms per step (mean) | wall s (mean) | input tokens (mean) | cost per run |
-|---|---|---|---|---|---|---|---|
-| ship_cheapest | 5 | 5/5 | 6.0 | 190 | 1.14 | 6148 | $0.000258 |
-| ship_fastest_gift | 5 | 5/5 | 5.0 | 168 | 0.84 | 4964 | $0.000208 |
-| cancel_fraud | 5 | 5/5 | 1.0 | 189 | 0.19 | 1013 | $0.000043 |
+| scenario | runs | goal met | ended by | steps (mean) | refused (mean) | ms per step (mean) | wall s (mean) | input tokens (mean) | cost per run |
+|---|---|---|---|---|---|---|---|---|---|
+| ship_cheapest | 5 | 5/5 | environment_terminal 5 | 6.0 | 0.0 | 241 | 1.45 | 6304 | $0.000265 |
+| ship_fastest_gift | 5 | 5/5 | environment_terminal 5 | 5.0 | 0.0 | 199 | 0.99 | 5094 | $0.000214 |
+| cancel_fraud | 5 | 5/5 | environment_terminal 5 | 1.0 | 0.0 | 197 | 0.20 | 1039 | $0.000044 |
 
 Cost is input tokens at TypeSafe's published $0.042 per million; output tokens are free. The raw
 rows are in [docs/reports/bench-2026-09-19.json](docs/reports/bench-2026-09-19.json).
@@ -260,6 +318,13 @@ the model reads a clear state well. It does not say the model will solve a task 
 state, arithmetic, dates, or long irrelevant context; TypeSafe documents those as its weak spots,
 and the design document lists them. The benchmark is a floor to keep, not a ceiling reached.
 
+The "ended by" and "refused" columns are there because the number moved during the day. Before the
+observation said "Shipped: no", the model's confidence on `ship` sat on the 0.8 destructive gate and
+two runs in five ended as `no_confident_action`, which is the loop refusing a destructive action it
+was 76 percent sure of. That is the gate doing its job; the fix was to make the environment say
+what the goal asks about, not to lower the gate. A run that ends that way under HarnessRouter is a
+door for a person, never a silent failure.
+
 ## Tests
 
 ```sh
@@ -267,25 +332,27 @@ pip install -e . pytest
 pytest -q tests
 ```
 
-Thirty tests: the compiler (free text refused, reserved names, the 255 ceiling, dynamic
-feasibility, disabling by omission), the encoder (state shape, truncation order), the gate
-(thresholds by risk, weakest judgment, unstated optionals), the controller (every terminal reason,
-cancellation, continuation) and the UHP server over HTTP (discovery, auth, versions, blocking and
-streamed tasks, continuation, cancel, delete). A recorded-answers provider stands in for the model,
-so the suite needs no key and runs in under two seconds.
+Thirty-five tests: the compiler (free text refused, reserved names, the 255 ceiling, dynamic
+feasibility, disabling by omission), the tool compiler (every enumerable shape, every unsupported
+reason, type coercion), the encoder (state shape, truncation order), the gate (thresholds by risk,
+weakest judgment, unstated optionals), the controller (every terminal reason, cancellation,
+continuation), the MCP environment (the order desk over stdio compiles to the same actions and
+ships the order) and the UHP server over HTTP (discovery, auth, versions, blocking and streamed
+tasks, continuation, cancel, delete). A recorded-answers provider stands in for the model, so the
+suite needs no key and runs in about two seconds.
 
 ## What comes next
 
 Each is a milestone with a measurement attached, in the order they unlock each other:
 
 1. A `systemone` base in [HarnessRouter](https://github.com/HarnessRouter/harnessrouter), so this
-   loop sits beside the System Two harnesses and an `escalate` step opens a door to one of them.
+   loop sits beside the System Two harnesses: the harness configuration's MCP servers are the
+   environment, every action is an item in the task stream, and a run that ends in
+   `escalation_requested` or `no_confident_action` opens a door for a person or a System Two harness.
 2. Skills as an action: `load_skill` brings a named skill's text into the state for the steps that
    need it, since the state is capped and irrelevant state costs accuracy.
-3. Tools compiled to actions at configuration time from an MCP catalogue, with the ones that
-   need free text listed honestly as unsupported rather than silently dropped.
-4. A browser environment and a booking-page demo, where the loop's latency is visible.
-5. The `extended` conformance class.
+3. A simulator and a mission-control page on the task stream, where the loop's latency is visible.
+4. The `extended` conformance class.
 
 ## Sources
 

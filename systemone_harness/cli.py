@@ -2,6 +2,8 @@
 
     s1 run --goal "Ship order A-104 with the cheapest carrier." [--env order:ship_cheapest]
     s1 run --actions my_actions.yaml --env-cmd "python3 my_env.py" --goal "…"
+    s1 run --mcp "python3 -m my_env_server" --goal "…"
+    s1 tools --mcp https://host/mcp
     s1 serve --api-key KEY [--port 8710]
     s1 bench [--runs 3]
 """
@@ -15,14 +17,46 @@ import time
 
 from .actions import ActionSpace
 from .controller import Controller
-from .envs import OrderWorkflow, StdioEnvironment
+from .envs import McpEnvironment, OrderWorkflow, StdioEnvironment
 from .provider import OpenRouterProvider, ProviderError, TypeSafeProvider, provider_from_env
 from .trace import Step
 
 PRICE_PER_INPUT_TOKEN = 0.042 / 1_000_000   # TypeSafe's published price; output tokens are free
 
 
+def _mcp_entry(a) -> dict:
+    spec = a.mcp
+    if spec.startswith(("http://", "https://")):
+        entry: dict = {"url": spec}
+        if a.mcp_transport:
+            entry["transport"] = a.mcp_transport
+        headers = {}
+        for h in a.mcp_header or []:
+            k, _, v = h.partition(":")
+            if k.strip() and v.strip():
+                headers[k.strip()] = v.strip()
+        if headers:
+            entry["headers"] = headers
+        return entry
+    return spec          # a command line; the environment splits it
+
+
+def _overlay(path: str | None) -> dict:
+    """With an MCP server the tools are the actions; a YAML may still set instructions and gate."""
+    if not path:
+        return {}
+    import yaml
+    d = yaml.safe_load(open(path)) or {}
+    return {k: d[k] for k in ("instructions", "gate", "escalate") if k in d}
+
+
 def _env_and_space(a) -> tuple:
+    if getattr(a, "mcp", None):
+        env = McpEnvironment(_mcp_entry(a))
+        cat = env.catalogue(**_overlay(a.actions))
+        for name, why in cat.unsupported.items():
+            print(f"unsupported tool {name}: {why}", file=sys.stderr)
+        return env, cat.space
     if a.env_cmd:
         if not a.actions:
             sys.exit("--env-cmd needs --actions <yaml>: the harness cannot guess an environment's actions")
@@ -33,7 +67,21 @@ def _env_and_space(a) -> tuple:
         env = OrderWorkflow(scenario)
         space = ActionSpace.from_yaml(a.actions) if a.actions else OrderWorkflow.action_space()
         return env, space
-    sys.exit(f"unknown --env {spec!r}; use order[:scenario] or --env-cmd")
+    sys.exit(f"unknown --env {spec!r}; use order[:scenario], --env-cmd or --mcp")
+
+
+def cmd_tools(a) -> int:
+    env = McpEnvironment(_mcp_entry(a))
+    try:
+        cat = env.catalogue(**_overlay(a.actions))
+    finally:
+        env.close()
+    print(f"{len(cat.space.actions)} actions, {len(cat.unsupported)} unsupported")
+    print(cat.table())
+    if a.json:
+        with open(a.json, "w") as f:
+            json.dump(cat.to_dict(), f, indent=1)
+    return 0
 
 
 def _print_step(s: Step) -> None:
@@ -89,7 +137,18 @@ def cmd_serve(a) -> int:
         return TypeSafeProvider(ts_key, model.split("/")[-1])
 
     harnesses = []
-    if a.actions and a.env_cmd:
+    if getattr(a, "mcp", None):
+        entry = _mcp_entry(a)
+        probe = McpEnvironment(entry)
+        try:
+            cat = probe.catalogue(**_overlay(a.actions))
+        finally:
+            probe.close()
+        for name, why in cat.unsupported.items():
+            print(f"unsupported tool {name}: {why}", file=sys.stderr)
+        harnesses.append(HarnessDef(id="chrn_" + _slug(a.name or "mcp"), name=a.name or "mcp", space=cat.space,
+                                    env_factory=lambda entry=entry: McpEnvironment(entry)))
+    elif a.actions and a.env_cmd:
         space = ActionSpace.from_yaml(a.actions)
         cmd = a.env_cmd
         harnesses.append(HarnessDef(id="chrn_" + _slug(a.name or "custom"), name=a.name or "custom", space=space,
@@ -130,12 +189,17 @@ def cmd_bench(a) -> int:
                          "model": run.served_model})
             print(f"{scenario:18s} run {i+1}: {run.status:10s} goal_met={env.goal_met()!s:5s} steps={len(run.steps)} "
                   f"wall={dt:.2f}s tokens={run.usage['input_tokens']}")
-    print("\n| scenario | runs | goal met | steps (mean) | ms per step (mean) | wall s (mean) | input tokens (mean) | cost per run |")
-    print("|---|---|---|---|---|---|---|---|")
+    print("\n| scenario | runs | goal met | ended by | steps (mean) | refused (mean) | ms per step (mean) | wall s (mean) | input tokens (mean) | cost per run |")
+    print("|---|---|---|---|---|---|---|---|---|---|")
     for scenario in OrderWorkflow.SCENARIOS:
         rs = [r for r in rows if r["scenario"] == scenario]
         n = len(rs)
-        print(f"| {scenario} | {n} | {sum(r['goal_met'] for r in rs)}/{n} | {sum(r['steps'] for r in rs)/n:.1f} | "
+        ends: dict = {}
+        for r in rs:
+            ends[r["reason"]] = ends.get(r["reason"], 0) + 1
+        ended = ", ".join(f"{k} {v}" for k, v in sorted(ends.items(), key=lambda kv: -kv[1]))
+        print(f"| {scenario} | {n} | {sum(r['goal_met'] for r in rs)}/{n} | {ended} | {sum(r['steps'] for r in rs)/n:.1f} | "
+              f"{sum(r['refused'] for r in rs)/n:.1f} | "
               f"{sum(r['ms_per_step'] for r in rs)/n:.0f} | {sum(r['wall_s'] for r in rs)/n:.2f} | "
               f"{sum(r['input_tokens'] for r in rs)/n:.0f} | ${sum(r['cost_usd'] for r in rs)/n:.6f} |")
     print(f"\nmodel: {rows[0]['model'] if rows else '?'}; price: ${0.042}/M input tokens, output free (TypeSafe's published price)")
@@ -143,6 +207,12 @@ def cmd_bench(a) -> int:
         with open(a.json, "w") as f:
             json.dump(rows, f, indent=1)
     return 0
+
+
+def _mcp_args(p) -> None:
+    p.add_argument("--mcp", help="an MCP server as the environment: a command (stdio) or a URL")
+    p.add_argument("--mcp-transport", choices=["sse", "http"], help="for a URL; streamable HTTP unless sse")
+    p.add_argument("--mcp-header", action="append", metavar="NAME: VALUE", help="a header for a URL server, repeatable")
 
 
 def _slug(s: str) -> str:
@@ -156,7 +226,8 @@ def main(argv=None) -> int:
     r.add_argument("--goal")
     r.add_argument("--env", help="order[:scenario] (built in)")
     r.add_argument("--env-cmd", help="a command that speaks the stdio environment protocol")
-    r.add_argument("--actions", help="an action space YAML (required with --env-cmd)")
+    r.add_argument("--actions", help="an action space YAML (required with --env-cmd; instructions and gate overlay with --mcp)")
+    _mcp_args(r)
     r.add_argument("--model")
     r.add_argument("--max-steps", type=int, default=100)
     r.add_argument("--timeout", type=float)
@@ -169,7 +240,13 @@ def main(argv=None) -> int:
     s.add_argument("--actions")
     s.add_argument("--env-cmd")
     s.add_argument("--name")
+    _mcp_args(s)
     s.set_defaults(fn=cmd_serve)
+    t = sub.add_parser("tools", help="show what an MCP server's tools compile to")
+    _mcp_args(t)
+    t.add_argument("--actions", help="instructions and gate overlay")
+    t.add_argument("--json", help="write the catalogue here")
+    t.set_defaults(fn=cmd_tools)
     b = sub.add_parser("bench", help="run the built-in scenarios and report the numbers")
     b.add_argument("--runs", type=int, default=3)
     b.add_argument("--model")
