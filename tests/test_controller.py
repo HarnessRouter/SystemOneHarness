@@ -124,8 +124,15 @@ def test_a_real_time_environment_is_not_stopped_by_refusals_or_repeats():
     shaky = lambda s, q: fill(q, {"next_action": choice(q, "next_action", "cancel_order", 0.6),
                                   "cancel_order__reason": choice(q, "cancel_order__reason", "fraud", 0.9)})
     run = Controller(OrderWorkflow.action_space(), env, RecordedProvider(shaky), refusal_streak=3, max_steps=6).run(env.goal)
-    assert run.status == "incomplete" and run.reason == "max_steps"      # six refusals, and the clock is what ends it
+    assert run.status == "incomplete" and run.reason == "max_steps"      # six refusals of a WRITE, and the clock is what ends it
     assert [s.verdict for s in run.steps] == ["refused"] * 6
+    assert env.order["status"] == "new"                                  # a destructive action still waits for confidence
+    env = _Realtime("ship_fastest_gift")
+    unsure = lambda s, q: fill(q, {"next_action": choice(q, "next_action", "add_note", 0.4),
+                                   "add_note__note": choice(q, "add_note__note", "delay", 0.9)})
+    run = Controller(OrderWorkflow.action_space(), env, RecordedProvider(unsure), max_steps=2).run(env.goal)
+    assert [s.verdict for s in run.steps] == ["run", "run"]              # a read-risk choice below the threshold runs in real time
+    assert "below the read threshold" in run.steps[0].note and env.order["notes"]
     env = _Realtime("ship_cheapest")
     run = Controller(OrderWorkflow.action_space(), env, max_steps=4,
                      provider=RecordedProvider(lambda s, q: fill(q, {"next_action": choice(q, "next_action", "pack")}))).run(env.goal)

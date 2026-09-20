@@ -84,6 +84,13 @@ class Controller:
                     return self._end(run, "failed", "provider_error")
                 verdict = self.gate.judge(dec.answers, compiled, self.space)
                 note = "; ".join(enc.truncations)
+                if realtime and verdict.kind == "refused" and verdict.action in self.space.actions \
+                        and self.space.actions[verdict.action].risk == "read":
+                    # In real time not deciding is a decision: the last keys stay held, the world
+                    # moves. A refusal of a harmless action buys nothing a run of it would not, so
+                    # the strongest choice runs and the verdict says it ran below the threshold.
+                    verdict.kind = "run"
+                    note = _join(note, f"strongest choice {verdict.weakest:.2f}, below the read threshold; in real time it runs")
                 if compiled.omitted:
                     note = "; ".join(x for x in (note, "not offered: " + ", ".join(
                         f"{k} ({v})" for k, v in compiled.omitted.items())) if x)

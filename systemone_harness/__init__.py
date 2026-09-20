@@ -14,7 +14,7 @@ from .provider import (DecisionProvider, OpenRouterProvider, ProviderError, Reco
                        TypeSafeProvider, provider_from_env)
 from .trace import Run, Step, reasoning_text
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 __all__ = ["Action", "ActionSpace", "ActionSpaceError", "Guard", "Param", "Controller", "StateEncoder",
            "Environment", "Observation", "Result", "Gate", "Verdict", "DecisionProvider",
            "OpenRouterProvider", "TypeSafeProvider", "RecordedProvider", "ProviderError",
