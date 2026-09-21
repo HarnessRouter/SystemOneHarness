@@ -56,6 +56,8 @@ class Run:
     finished_at: float | None = None
     artifacts: list[str] = field(default_factory=list)
     error: str | None = None
+    config_version: int = 0        # the configuration the run was made under
+    handoff: dict | None = None    # on no_confident_action or escalation_requested: the refused step, for whoever takes over
 
     @property
     def executed(self) -> int:
@@ -92,7 +94,7 @@ class Run:
 
     def to_dict(self) -> dict:
         d = asdict(self)
-        d["summary"] = self.summary()
+        d["summary"] = self.summary() + (" A handoff is attached." if self.handoff else "")
         d["executed"] = self.executed
         return d
 
