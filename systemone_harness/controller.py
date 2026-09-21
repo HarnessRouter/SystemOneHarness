@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import threading
 import time
 from typing import Callable
@@ -31,8 +32,11 @@ class Controller:
     def __init__(self, space: ActionSpace, env: Environment, provider, encoder: StateEncoder | None = None,
                  gate: Gate | None = None, max_steps: int = 100, timeout_seconds: float | None = None,
                  refusal_streak: int = 3, disabled: set[str] | None = None,
-                 on_step: Callable[[Step], None] | None = None):
+                 on_step: Callable[[Step], None] | None = None, config_version: int = 0,
+                 trace_path: str | None = None):
         self.space = space
+        self.config_version = config_version
+        self.trace_path = trace_path or os.environ.get("SYSTEMONE_TRACE_PATH") or None
         self.env = env
         self.provider = provider
         self.encoder = encoder or StateEncoder(instructions=space.instructions)
@@ -50,7 +54,7 @@ class Controller:
 
     def run(self, goal: str, memory: dict | None = None, reset: bool = True, task_instructions: str = "",
             prior: list[Step] | None = None) -> Run:
-        run = Run(goal=goal)
+        run = Run(goal=goal, config_version=self.config_version)
         memory = dict(memory or {})
         history: list[Step] = list(prior or [])   # a continued session carries its earlier steps
         if reset:
@@ -158,11 +162,24 @@ class Controller:
         if self.on_step:
             self.on_step(step)
 
-    @staticmethod
-    def _end(run: Run, status: str, reason: str) -> Run:
+    def _end(self, run: Run, status: str, reason: str) -> Run:
         run.status = status
         run.reason = reason
         run.finished_at = time.time()
+        if reason in ("no_confident_action", "escalation_requested") and run.steps:
+            # the branch for whoever takes over: the state the reflex could not decide on, what it
+            # was asked, what it answered, and how far short it fell
+            last = run.steps[-1]
+            action = self.space.actions.get(last.action) if last.action else None
+            run.handoff = {"reason": reason, "state": last.state, "questions": last.questions, "answers": last.answers,
+                           "weakest": last.weakest, "threshold": last.threshold,
+                           "risk": action.risk if action is not None else None, "step": last.index}
+        if self.trace_path:
+            try:
+                with open(self.trace_path, "w") as f:
+                    json.dump(run.to_dict(), f, indent=1, default=str)
+            except OSError:
+                pass
         return run
 
 

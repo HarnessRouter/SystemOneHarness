@@ -13,9 +13,12 @@ from .gate import Gate, Verdict
 from .provider import (DecisionProvider, OpenRouterProvider, ProviderError, RecordedProvider,
                        TypeSafeProvider, provider_from_env)
 from .trace import Run, Step, reasoning_text
+from .config import Config
+from .objective import evaluate, report, scoreboard, compare
+from .provider import ScriptProvider
 
-__version__ = "0.3.1"
-__all__ = ["Action", "ActionSpace", "ActionSpaceError", "Guard", "Param", "Controller", "StateEncoder",
+__version__ = "0.4.0"
+__all__ = ["Config", "evaluate", "report", "scoreboard", "compare", "ScriptProvider", "Action", "ActionSpace", "ActionSpaceError", "Guard", "Param", "Controller", "StateEncoder",
            "Environment", "Observation", "Result", "Gate", "Verdict", "DecisionProvider",
            "OpenRouterProvider", "TypeSafeProvider", "RecordedProvider", "ProviderError",
            "provider_from_env", "Run", "Step", "reasoning_text"]

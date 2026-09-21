@@ -99,6 +99,58 @@ class TypeSafeProvider(DecisionProvider):
         super().__init__("https://api.typesafe.ai", "/v1/systemone", api_key, model, **kw)
 
 
+class ScriptProvider:
+    """A fixed sequence of actions, for probes: a run made to measure the environment, not to
+    reach the goal. Each entry is an action name, or `name(param=value, ...)`; when the script
+    runs out the provider chooses `finish`. Every question gets a sure answer so the gate never
+    refuses a probe."""
+
+    def __init__(self, actions: list[str], model: str = "script/s1"):
+        self.actions = list(actions)
+        self.model = model
+        self.calls = 0
+
+    def decide(self, state, questions: dict) -> Decision:
+        from .encoder import estimate_tokens
+        entry = self.actions[self.calls] if self.calls < len(self.actions) else "finish"
+        self.calls += 1
+        name, params = _parse_script_entry(entry)
+        answers: dict = {}
+        for key, q in questions.items():
+            if key == "next_action":
+                pick = name if name in (q.get("criteria") or {}) else next(iter(q.get("criteria") or {name: ""}))
+                answers[key] = {"type": "choice", "choice": pick, "probabilities": {k: (0.99 if k == pick else 0.0) for k in (q.get("criteria") or {pick: ""})}, "confidence": 0.99}
+            elif key == "goal_reached":
+                answers[key] = {"type": "noul", "noul": 0.95 if name == "finish" else 0.0}
+            elif q.get("type") == "choice":
+                crit = q.get("criteria") or {}
+                pname = key.split("__", 1)[1] if "__" in key else key
+                pick = params.get(pname, next(iter(crit), None))
+                if pick is not None and pick not in crit:
+                    pick = next(iter(crit), pick)
+                answers[key] = {"type": "choice", "choice": pick, "probabilities": {k: (0.99 if k == pick else 0.0) for k in crit}, "confidence": 0.99}
+            elif q.get("type") == "noul":
+                answers[key] = {"type": "noul", "noul": 0.99}
+            else:
+                answers[key] = {"type": "score", "score": 0, "probabilities": {}, "confidence": 0.99}
+        return Decision(answers=answers, usage={"input_tokens": estimate_tokens({"state": state, "questions": questions}),
+                                                "output_tokens": len(answers)},
+                        model=self.model, request_id=f"script-{self.calls}", latency_ms=1, raw={"script": entry})
+
+
+def _parse_script_entry(entry: str) -> tuple[str, dict]:
+    entry = entry.strip()
+    if "(" not in entry:
+        return entry, {}
+    name, rest = entry.split("(", 1)
+    params = {}
+    for part in rest.rstrip(")").split(","):
+        if "=" in part:
+            k, v = part.split("=", 1)
+            params[k.strip()] = v.strip().strip("'\"")
+    return name.strip(), params
+
+
 class RecordedProvider:
     """Answers from a script or a function, for tests and the benchmark's dry runs.
 

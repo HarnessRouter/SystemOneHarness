@@ -200,6 +200,28 @@ The benchmark proves the controller, compiler, gate, and model can complete thes
 
 [Inspect the raw benchmark rows →](docs/reports/bench-2026-09-19.json)
 
+## Configuration, objective and the outer loop
+
+Everything that shapes the reflex's decisions except the model and the world is one versioned
+YAML, the action-space file extended: `version`, `instructions`, `gate`, `encoder`, `tunables`
+(numbers an environment's rendering reads), the optional declared `actions`, and an `objective`
+(what the environment counts as success, failure, ordered metrics and place). Skills, directories
+of `SKILL.md`, are compiled into the instructions once per load, since a reflex cannot open a file
+mid-step. The trace carries the configuration's version.
+
+```bash
+s1 run --mcp ./bin/env --config config.yaml --skills ./skills --goal "..." --json trace.json
+s1 run --mcp ./bin/env --config config.yaml --script "run_right,jump_right,jump_right"   # a probe
+s1 bench --mcp ./bin/env --config config.yaml --runs 3 --json-dir traces/               # one at a time, then the report
+s1 report --config config.yaml traces/run-*.json                                        # scoreboard and failure groups
+```
+
+A run that ends because the reflex could not decide (`no_confident_action`, or `escalate` chosen)
+carries a `handoff` on its record: the state it refused on, the questions, its answers with their
+probabilities, the weakest judgment and the threshold it failed. That is the branch for whoever
+takes over, a reasoning harness or a person. `docs/dual-loop.md` describes the outer loop that
+uses all of this to improve a configuration version by version.
+
 ## Command line
 
 ```text
