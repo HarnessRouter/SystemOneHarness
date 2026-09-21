@@ -234,9 +234,13 @@ the harness's plugin (`PUT /v1/harnesses/{id}/plugin`) or relaunching the kit
 (`POST /v1/kits/{id}/launch`) after the package changed; the harness runs the package captured at
 launch. The platform settings snapshot (`GET /v1/harnesses/{id}`) is stored in the ledger entry.
 
-**What the outer harness needs in its sandbox**: `HR_API_URL` and an org-scoped `HR_API_KEY`,
-never a provider key; with them it starts inner runs (`POST /v1/responses` with
-`metadata.harness_id`, one at a time), reads sessions, turns and files, and publishes versions.
+**What the outer harness needs in its sandbox**: `HR_API_URL` and `HR_CALIBRATION_TOKEN`, a
+credential minted by the gateway for that turn and scoped to one inner harness: it may start runs
+on that harness only, read those runs' sessions, turns and files, and publish that harness's
+package; it can do nothing else and expires with the turn. Never an org key and never a provider
+key: a standing org key inside a sandbox would let a running agent spend the org's credit and read
+every session, the exposure class the platform's credential rules forbid (raised by the hosted
+session on 2026-09-21 and adopted here).
 
 **Probes**: a run with `metadata.systemone.script: ["run_right", "jump_right", ...]` selects the
 harness's scripted provider instead of the model; the trace says so.
