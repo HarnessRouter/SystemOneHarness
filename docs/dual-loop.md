@@ -1,7 +1,11 @@
 # The dual loop: a harness that calibrates another harness's configuration
 
-Status: design for discussion (2026-09-21, third pass). Nothing here is built except the inner
-loops themselves.
+Status: built and run once end to end (2026-09-21). The harness side is 0.4.0; the first instance
+(the Super Mario kit with the `calibrate` package, starter-kit PR #31) and the platform side
+(HarnessRouter v0.23.1: the scoped per-turn credential, the driver reading the configuration and
+writing the trace, the handoff on the result) ran the loop on the test box: a Calibrator on a
+reasoning base took the Mario harness from 1 of 3 passes to 2 of 3 with one instruction change,
+kept by the ordered metrics, ledger line written, six of eight budgeted runs used.
 
 The design is generic on both sides. The **outer loop** is a reasoning harness running a
 calibration method. The **inner loop** is any harness on the platform: a System One reflex (one
