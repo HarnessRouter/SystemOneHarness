@@ -15,12 +15,21 @@ objective, both shipped as packages. One instance of each kind is described at t
 **Every harness is a loop from what the model is shown to what the model does, shaped by a
 configuration.** A reflex selects one declared action per step from a rendered state. An agent
 plans, calls tools and writes files across many steps. In both, the model's behaviour is bounded
-by four things it does not control:
+by four channels it does not control. The channels are not kinds of artifact; they are the four
+ways a configuration reaches the model's loop, and one artifact usually reaches it through more
+than one:
 
-| | What the model is **told** | What it is **shown** | What it is **allowed** | How **often** it acts |
-|---|---|---|---|---|
-| System One | instructions: facts and rules | the rendered state | the declared actions and the gate thresholds | the decision rate |
-| System Two | the system prompt and its skills | the context: files, tool results, memory | the tools, plugins, permissions, disabled tools | the step, time and cost budgets |
+| Channel | What it is | System One | System Two |
+|---|---|---|---|
+| **Told** | authored text that enters the model's input before the run: instructions, the descriptions of every action or tool, skill text, plugin instructions, memory notes | the instructions; each action's description | the system prompt; every tool's and skill's description and text; each plugin's instructions; memory files |
+| **Shown** | content that enters the input at run time, and the policy that renders it: what is included, how it is described, how much history | the rendered state and its tunables; the history depth | task input, tool results, file contents, retrieved memory; the context policy that admits and trims them |
+| **Allowed** | what the model may invoke, and the checks on invoking it | the declared actions; the gate thresholds by risk | the tool set, plugins' tools, permissions, disabled tools |
+| **Pace** | how often and how much | the decision rate | the step, time and cost budgets |
+
+So a plugin is not "told" or "allowed": it is both, its instructions and descriptions in the first
+channel and its tools in the third. A skill is told (its text) and sometimes shown (the files it
+brings in). A tool is told (its description) and allowed (its availability). The outer loop edits
+artifacts; the channels are how it reasons about what an edit changes for the model.
 
 Those four are the configuration. The model's weights and the world's truth are not.
 
