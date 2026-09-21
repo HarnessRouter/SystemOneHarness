@@ -21,15 +21,23 @@ than one:
 
 | Channel | What it is | System One | System Two |
 |---|---|---|---|
-| **Told** | authored text that enters the model's input before the run: instructions, the descriptions of every action or tool, skill text, plugin instructions, memory notes | the instructions; each action's description | the system prompt; every tool's and skill's description and text; each plugin's instructions; memory files |
+| **Told** | authored text that enters the model's input before the run: instructions, the descriptions of every action or tool, skill text, plugin instructions, memory notes | the same list, through the same UHP abstractions: the system prompt is the instructions; a plugin's MCP tools are the actions, each tool's description its action's description; a plugin's instructions and its skills' text are compiled into the instructions once per version, since a reflex cannot open a file mid-step; memory files the same way | the system prompt; every tool's and skill's description and text; each plugin's instructions; memory files, read lazily at run time |
 | **Shown** | content that enters the input at run time, and the policy that renders it: what is included, how it is described, how much history | the rendered state and its tunables; the history depth | task input, tool results, file contents, retrieved memory; the context policy that admits and trims them |
-| **Allowed** | what the model may invoke, and the checks on invoking it | the declared actions; the gate thresholds by risk | the tool set, plugins' tools, permissions, disabled tools |
+| **Allowed** | what the model may invoke, and the checks on invoking it | the plugins' tools as the declared actions, disabled tools removed; the gate thresholds by risk | the tool set, plugins' tools, permissions, disabled tools |
 | **Pace** | how often and how much | the decision rate | the step, time and cost budgets |
 
 So a plugin is not "told" or "allowed": it is both, its instructions and descriptions in the first
 channel and its tools in the third. A skill is told (its text) and sometimes shown (the files it
 brings in). A tool is told (its description) and allowed (its availability). The outer loop edits
 artifacts; the channels are how it reasons about what an edit changes for the model.
+
+The two kinds of harness consume the same UHP artifacts (system prompt, plugins with tools and
+skills, memory); they differ only in when. An agent reads a skill when it decides to; a reflex
+gets one model call per step and no file access inside it, so the harness compiles what the
+plugins say into the instructions ahead of the run, bounded by the context budget, and recompiles
+on a new version. Today the System One base declares no built-in tools and takes no skills; the
+first harness change in section 5 is to take skills and plugin instructions this way, so that a
+kit's facts can ship as a skill package like every other kit's.
 
 Those four are the configuration. The model's weights and the world's truth are not.
 
@@ -151,7 +159,7 @@ an export later, as a view, not as the store.
 
 | Piece | Repo | Owner |
 |---|---|---|
-| The configuration file format and schema declaration; the reflex reads tunables, actions and gate from it; `trace.json` to the workspace | SystemOneHarness | this session |
+| The configuration file format and schema declaration; the reflex reads tunables, actions and gate from it; `trace.json` to the workspace; skills and plugin instructions compiled into the instructions per version | SystemOneHarness | this session |
 | The objective declaration read and exposed in the result's fields; the scripted provider for probes; `handoff` (#3) | SystemOneHarness | this session |
 | The calibration Skill, agnostic of harness kind and environment | starter-kit | this session |
 | Instance one: the Mario package ships config v1, its objective, its evidence renderer | starter-kit | this session |
