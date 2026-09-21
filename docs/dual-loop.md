@@ -196,3 +196,47 @@ system prompt, the skill texts, the tool set, the budgets. Probe: one scenario w
 The existing support-matrix scenarios are the first suite; the outer loop's first job on it is the
 one a person does today by hand after a matrix run: read the failures, change one line of a skill
 or the prompt, run the matrix again.
+
+## Appendix B: the contracts (fixed 2026-09-21, so the three repositories can build in parallel)
+
+**The configuration file** is the harness's existing action-space YAML (`--actions`), extended.
+It lives at the root of the inner harness's plugin package as `config.yaml`:
+
+```yaml
+version: 1
+instructions: "..."                 # told (the kit's system prompt moves here)
+gate: {read: 0.5, write: 0.7, destructive: 0.9}
+encoder: {history_steps: 3}
+tunables: {enemy_horizon_tiles: 24, ...}     # read by the environment through PLUGIN_ROOT
+actions: [...]                      # optional per-action notes and guards, as today
+objective:
+  pass: "cleared == true"
+  failure: "lives decreased"
+  metrics: [{field: cleared, better: true}, {field: deaths, better: lower}, {field: level_x, better: higher}, {field: elapsed, better: lower}]
+  locus: [level_x]
+  evidence: observations/
+```
+
+**The run's files**, in the session workspace: `trace.json` (the harness's run record: steps with
+state, questions, answers with probabilities, verdict, result, latency, usage; `config_version`;
+`handoff` or null), and `observations/` when the environment archives what it showed (for Mario,
+`NNNNNN.jpg` frames with a `frames.jsonl` of timestamps).
+
+**The handoff object** on `trace.json` and on the platform's result event (`handoff`, next to
+`reason`): `{reason, state, questions, answers, weakest, threshold, risk, step}`; null otherwise.
+
+**The ledger**, `ledger.jsonl` at the root of the package, one line per version:
+`{version, at, change, channel, evidence: [session ids and file paths], runs: [session ids],
+metrics_before, metrics_after, verdict: kept|reverted, note}`.
+
+**Publishing a version** = uploading the package with the new `config.yaml` and `ledger.jsonl` as
+the harness's plugin (`PUT /v1/harnesses/{id}/plugin`) or relaunching the kit
+(`POST /v1/kits/{id}/launch`) after the package changed; the harness runs the package captured at
+launch. The platform settings snapshot (`GET /v1/harnesses/{id}`) is stored in the ledger entry.
+
+**What the outer harness needs in its sandbox**: `HR_API_URL` and an org-scoped `HR_API_KEY`,
+never a provider key; with them it starts inner runs (`POST /v1/responses` with
+`metadata.harness_id`, one at a time), reads sessions, turns and files, and publishes versions.
+
+**Probes**: a run with `metadata.systemone.script: ["run_right", "jump_right", ...]` selects the
+harness's scripted provider instead of the model; the trace says so.
