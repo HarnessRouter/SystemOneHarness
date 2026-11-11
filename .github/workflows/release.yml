@@ -1,0 +1,92 @@
+name: release
+
+# A tag v<version> publishes the package it names. The wheel is built from the tag by pinned, hashed
+# build tools (.github/build-requirements.txt), with the tag commit's time as SOURCE_DATE_EPOCH, so the
+# same tag builds the same bytes (the wheel only: an sdist's tar.gz is not reproducible, and the
+# release's source archive is the source); checked: the version is the tag's, the wheel installs in an
+# empty venv, imports, and the tests pass against it rather than against the checkout; and attached to
+# the tag's GitHub release, which is created if it is not there. A file already attached is never
+# replaced: whoever holds its digest holds what it was.
+#
+# HarnessRouter installs this harness from that wheel, with the wheel's sha256 in its lock
+# (harnessrouter: docker/locks/systemone.lock.txt), so nothing is built there at install time.
+#
+# Run by hand (Actions › release › Run workflow) for a tag pushed before this workflow existed, v0.4.0.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'The tag to build and attach, for example v0.4.0'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0     # the tag object and its commit, for the version check and SOURCE_DATE_EPOCH
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: The tag names a version, and pyproject.toml says the same
+        run: |
+          set -euo pipefail
+          case "$TAG" in v[0-9]*.[0-9]*.[0-9]*) ;; *) echo "::error::$TAG is not a v<major>.<minor>.<patch> tag"; exit 1 ;; esac
+          git rev-parse -q --verify "refs/tags/$TAG" >/dev/null || { echo "::error::no tag $TAG"; exit 1; }
+          [ "$(git rev-parse HEAD)" = "$(git rev-parse "$TAG^{commit}")" ] || { echo "::error::the checkout is not $TAG"; exit 1; }
+          V="${TAG#v}"
+          P="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          [ "$V" = "$P" ] || { echo "::error::the tag says $V, pyproject.toml says $P"; exit 1; }
+          echo "VERSION=$V" >> "$GITHUB_ENV"
+
+      - name: Build the wheel with the build tools the lock names
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check --require-hashes --no-deps -r .github/build-requirements.txt
+          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct "$TAG^{commit}")"; export SOURCE_DATE_EPOCH
+          python3 -m build --wheel --no-isolation
+          ls -l dist
+          [ "$(ls dist/*.whl | wc -l)" = 1 ] || { echo "::error::expected one wheel"; exit 1; }
+          (cd dist && sha256sum ./*)
+
+      - name: The wheel installs in an empty venv, imports, and passes the tests
+        run: |
+          set -euo pipefail
+          python3 -m venv /tmp/venv
+          /tmp/venv/bin/pip install --disable-pip-version-check "$(ls dist/*.whl)[mcp]" pytest
+          # python -I: the checkout's own systemone_harness/ is in the current directory, and must not be what imports.
+          /tmp/venv/bin/python -I -c "import systemone_harness, systemone_harness.envs.mcp; v = systemone_harness.__version__; assert v == '$VERSION', v"
+          /tmp/venv/bin/python -I -c 'import systemone_harness; p = systemone_harness.__file__; assert p.startswith("/tmp/venv/"), p; print("the wheel imports from", p)'
+          /tmp/venv/bin/s1 --help >/dev/null
+          # The pytest entry point, not `python -m pytest`: the entry point puts tests/ on the path and not the
+          # current directory, so the tests import the installed wheel; they still read the example beside them.
+          /tmp/venv/bin/pytest tests -q -p no:cacheprovider
+
+      - name: Attach the files to the tag's release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --verify-tag --title "$TAG" --notes-from-tag \
+              || gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes
+          fi
+          have="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
+          for f in dist/*; do
+            if printf '%s\n' "$have" | grep -qx "$(basename "$f")"; then
+              echo "::error::$(basename "$f") is already attached to $TAG; a changed file needs a new version"; exit 1
+            fi
+          done
+          gh release upload "$TAG" dist/*
+          { echo "## $TAG"; echo; echo 'Attached, with the sha256 a lock elsewhere pins:'; echo; echo '```'; (cd dist && sha256sum ./*); echo '```'; } >> "$GITHUB_STEP_SUMMARY"
